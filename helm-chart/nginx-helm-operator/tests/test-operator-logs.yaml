@@ -1,0 +1,56 @@
+# Test case for operator logs and health
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "nginx-helm-operator.fullname" . }}-test-logs
+  namespace: {{ include "nginx-helm-operator.namespaceName" . }}
+  labels:
+    {{- include "nginx-helm-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "4"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: test-logs
+    image: busybox:1.35
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set -e
+      echo "Testing operator logs and health..."
+      
+      # Get the operator pod name
+      OPERATOR_POD=$(kubectl get pods -l control-plane=controller-manager -n {{ include "nginx-helm-operator.namespaceName" . }} -o jsonpath='{.items[0].metadata.name}')
+      echo "Operator pod: $OPERATOR_POD"
+      
+      # Test 1: Check if operator is logging properly
+      echo "Test 1: Checking operator logs..."
+      kubectl logs $OPERATOR_POD -n {{ include "nginx-helm-operator.namespaceName" . }} --tail=20
+      
+      # Test 2: Check for panic errors in logs
+      echo "Test 2: Checking for panic errors..."
+      if kubectl logs $OPERATOR_POD -n {{ include "nginx-helm-operator.namespaceName" . }} | grep -i "panic\|DPANIC"; then
+        echo "ERROR: Found panic in operator logs!"
+        exit 1
+      else
+        echo "No panic errors found in logs"
+      fi
+      
+      # Test 3: Check if health endpoints are responding
+      {{- if .Values.healthCheck.enabled }}
+      echo "Test 3: Checking health endpoints..."
+      kubectl exec $OPERATOR_POD -n {{ include "nginx-helm-operator.namespaceName" . }} -- wget -q -O- http://localhost:{{ .Values.healthCheck.port }}/healthz || echo "Health check endpoint not responding"
+      kubectl exec $OPERATOR_POD -n {{ include "nginx-helm-operator.namespaceName" . }} -- wget -q -O- http://localhost:{{ .Values.healthCheck.port }}/readyz || echo "Readiness check endpoint not responding"
+      {{- end }}
+      
+      # Test 4: Check if metrics endpoint is responding
+      {{- if .Values.metrics.enabled }}
+      echo "Test 4: Checking metrics endpoint..."
+      kubectl exec $OPERATOR_POD -n {{ include "nginx-helm-operator.namespaceName" . }} -- wget -q -O- http://{{ .Values.metrics.bindAddress }}:{{ .Values.metrics.port }}/metrics || echo "Metrics endpoint not responding"
+      {{- end }}
+      
+      echo "All log and health tests passed!"

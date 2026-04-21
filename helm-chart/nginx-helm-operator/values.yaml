@@ -1,0 +1,202 @@
+# Default values for nginx-helm-operator
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Operator image configuration
+image:
+  repository: rohtash672/nginx-helm-operator
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Image pull secrets for private registries
+imagePullSecrets: []
+
+# Operator deployment configuration
+operator:
+  # Number of operator replicas
+  replicaCount: 1
+
+  # Resources for the operator pod
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+
+  # Node selector for operator pod placement
+  nodeSelector: {}
+
+  # Tolerations for operator pod scheduling
+  tolerations: []
+
+  # Affinity rules for operator pod placement
+  affinity: {}
+
+  # Security context for operator pod
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+
+  # Container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+      - ALL
+
+# Service account configuration
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# RBAC configuration
+rbac:
+  # Specifies whether RBAC resources should be created
+  create: true
+
+# CRD configuration
+crd:
+  # Specifies whether CRDs should be installed
+  create: true
+  # Annotations to add to CRDs
+  annotations: {}
+
+# Namespace configuration
+namespace:
+  # Specifies whether to create the namespace
+  create: true
+  # Name of the namespace (defaults to release namespace)
+  name: ""
+  # Annotations to add to the namespace
+  annotations: {}
+  # Labels to add to the namespace
+  labels: {}
+
+# Monitoring configuration
+monitoring:
+  # Enable Prometheus monitoring
+  enabled: false
+  # Service monitor configuration
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+# Webhook configuration
+webhook:
+  # Enable admission webhooks
+  enabled: false
+  # Webhook service configuration
+  service:
+    port: 9443
+  # Certificate configuration
+  certificate:
+    # Use cert-manager for certificate generation
+    certManager: false
+    # Manual certificate configuration
+    manual:
+      enabled: false
+      crt: ""
+      key: ""
+
+# Leader election configuration
+leaderElection:
+  # Enable leader election
+  enabled: true
+
+# Logging configuration
+logging:
+  # Log level (debug, info, warn, error)
+  level: info
+  # Log format (json, console)
+  format: json
+  # Enable development mode
+  development: false
+
+# Health check configuration
+healthCheck:
+  # Enable health check endpoint
+  enabled: true
+  # Health check port
+  port: 8081
+  # Readiness probe configuration
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+  # Liveness probe configuration
+  livenessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 1
+    failureThreshold: 3
+
+# Metrics configuration
+metrics:
+  # Enable metrics endpoint
+  enabled: true
+  # Metrics port
+  port: 8080
+  # Bind address
+  bindAddress: 127.0.0.1
+  # Secure metrics
+  secure: false
+
+# Pod disruption budget
+podDisruptionBudget:
+  # Enable pod disruption budget
+  enabled: false
+  # Minimum available pods
+  minAvailable: 1
+  # Maximum unavailable pods
+  # maxUnavailable: 1
+
+  # Network policy
+networkPolicy:
+  # Enable network policy
+  enabled: false
+  # Ingress rules
+  ingress: []
+  # Egress rules
+  egress: []
+
+# Additional environment variables
+env: []
+  # - name: EXAMPLE_VAR
+  #   value: "example-value"
+
+# Additional volumes
+volumes: []
+  # - name: example-volume
+  #   configMap:
+  #     name: example-configmap
+
+# Additional volume mounts
+volumeMounts: []
+  # - name: example-volume
+  #   mountPath: /etc/example
+  #   readOnly: true
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod labels
+podLabels: {}
+
+# Common labels applied to all resources
+commonLabels: {}
+
+# Common annotations applied to all resources
+commonAnnotations: {}

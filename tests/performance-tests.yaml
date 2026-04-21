@@ -1,0 +1,510 @@
+# Performance and Load Testing for nginx-helm-operator Conflict Resolution
+# This file contains performance test scenarios to validate system behavior under load
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: performance-test-config
+  namespace: nginx-helm-operator-system
+data:
+  performance-scenarios.yaml: |
+    # Performance Test Scenarios
+    scenarios:
+      load_test:
+        name: "Load Testing with Multiple Resources"
+        description: "Test system performance with multiple NginxDeployment resources"
+        resources: 50
+        concurrent_updates: 10
+        duration: "300s"
+        metrics:
+          - "reconciliation_time"
+          - "memory_usage"
+          - "cpu_usage"
+          - "conflict_rate"
+      
+      stress_test:
+        name: "Stress Testing with High Update Frequency"
+        description: "Test system under high-frequency update stress"
+        resources: 20
+        updates_per_second: 20
+        duration: "180s"
+        metrics:
+          - "error_rate"
+          - "reconciliation_latency"
+          - "queue_depth"
+      
+      endurance_test:
+        name: "Endurance Testing for Long-Running Operations"
+        description: "Test system stability over extended periods"
+        resources: 30
+        duration: "1800s"  # 30 minutes
+        update_interval: "30s"
+        metrics:
+          - "memory_leaks"
+          - "goroutine_count"
+          - "reconciliation_success_rate"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: performance-test-scripts
+  namespace: nginx-helm-operator-system
+data:
+  run-performance-tests.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Starting nginx-helm-operator performance tests..."
+    
+    # Global variables
+    TEST_NAMESPACE="performance-test"
+    RESULTS_DIR="/tmp/performance-results"
+    START_TIME=$(date +%s)
+    
+    # Setup test environment
+    setup_performance_test_environment() {
+        echo "Setting up performance test environment..."
+        
+        # Create test namespace
+        kubectl create namespace $TEST_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Create results directory
+        mkdir -p $RESULTS_DIR
+        
+        # Verify operator is running
+        kubectl wait --for=condition=Ready pod -l control-plane=controller-manager -n nginx-helm-operator-system --timeout=300s
+        
+        # Get baseline metrics
+        get_baseline_metrics
+        
+        echo "Performance test environment ready."
+    }
+    
+    # Get baseline metrics
+    get_baseline_metrics() {
+        echo "Collecting baseline metrics..."
+        
+        # Controller metrics
+        CONTROLLER_POD=$(kubectl get pods -n nginx-helm-operator-system -l control-plane=controller-manager -o jsonpath='{.items[0].metadata.name}')
+        
+        # Memory usage
+        kubectl top pod $CONTROLLER_POD -n nginx-helm-operator-system > $RESULTS_DIR/baseline-memory.txt
+        
+        # CPU usage
+        kubectl top pod $CONTROLLER_POD -n nginx-helm-operator-system --containers > $RESULTS_DIR/baseline-cpu.txt
+        
+        # Goroutine count (if metrics endpoint is available)
+        kubectl exec -n nginx-helm-operator-system $CONTROLLER_POD -- curl -s localhost:8080/metrics | grep go_goroutines > $RESULTS_DIR/baseline-goroutines.txt || echo "Metrics endpoint not available"
+        
+        echo "Baseline metrics collected."
+    }
+    
+    # Load test with multiple resources
+    run_load_test() {
+        echo "Running Load Test: Multiple Resources"
+        
+        local RESOURCE_COUNT=50
+        local CONCURRENT_UPDATES=10
+        local DURATION=300  # 5 minutes
+        
+        echo "Creating $RESOURCE_COUNT NginxDeployment resources..."
+        
+        # Create multiple resources
+        for i in $(seq 1 $RESOURCE_COUNT); do
+            cat <<EOF | kubectl apply -f -
+    apiVersion: deploy.example.com/v1alpha1
+    kind: NginxDeployment
+    metadata:
+      name: load-test-$i
+      namespace: $TEST_NAMESPACE
+    spec:
+      deploymentName: load-app-$i
+      namespace: $TEST_NAMESPACE
+      image: nginx:1.24
+      replicas: 1
+    EOF
+        done
+        
+        echo "Waiting for initial reconciliation..."
+        sleep 30
+        
+        # Start concurrent updates
+        echo "Starting concurrent updates for $DURATION seconds..."
+        
+        local END_TIME=$(($(date +%s) + DURATION))
+        local UPDATE_COUNT=0
+        
+        # Background update processes
+        for j in $(seq 1 $CONCURRENT_UPDATES); do
+            (
+                while [ $(date +%s) -lt $END_TIME ]; do
+                    RESOURCE_ID=$((RANDOM % RESOURCE_COUNT + 1))
+                    REPLICA_COUNT=$((RANDOM % 5 + 1))
+                    
+                    kubectl patch nginxdeployment load-test-$RESOURCE_ID -n $TEST_NAMESPACE \
+                        --type='merge' -p="{\"spec\":{\"replicas\":$REPLICA_COUNT}}" \
+                        2>/dev/null || true
+                    
+                    sleep 1
+                done
+            ) &
+        done
+        
+        # Monitor metrics during test
+        monitor_metrics_during_test $DURATION "load-test" &
+        MONITOR_PID=$!
+        
+        # Wait for all background processes
+        wait
+        kill $MONITOR_PID 2>/dev/null || true
+        
+        # Collect final metrics
+        collect_test_metrics "load-test"
+        
+        # Cleanup resources
+        echo "Cleaning up load test resources..."
+        kubectl delete nginxdeployment --all -n $TEST_NAMESPACE
+        
+        echo "Load test completed."
+    }
+    
+    # Stress test with high update frequency
+    run_stress_test() {
+        echo "Running Stress Test: High Update Frequency"
+        
+        local RESOURCE_COUNT=20
+        local UPDATES_PER_SECOND=20
+        local DURATION=180  # 3 minutes
+        
+        echo "Creating $RESOURCE_COUNT NginxDeployment resources..."
+        
+        # Create resources for stress test
+        for i in $(seq 1 $RESOURCE_COUNT); do
+            cat <<EOF | kubectl apply -f -
+    apiVersion: deploy.example.com/v1alpha1
+    kind: NginxDeployment
+    metadata:
+      name: stress-test-$i
+      namespace: $TEST_NAMESPACE
+    spec:
+      deploymentName: stress-app-$i
+      namespace: $TEST_NAMESPACE
+      image: nginx:1.24
+      replicas: 1
+    EOF
+        done
+        
+        echo "Waiting for initial reconciliation..."
+        sleep 30
+        
+        # Start high-frequency updates
+        echo "Starting high-frequency updates ($UPDATES_PER_SECOND updates/sec for $DURATION seconds)..."
+        
+        local END_TIME=$(($(date +%s) + DURATION))
+        local UPDATE_INTERVAL=$(echo "scale=3; 1/$UPDATES_PER_SECOND" | bc)
+        
+        # Monitor metrics during stress test
+        monitor_metrics_during_test $DURATION "stress-test" &
+        MONITOR_PID=$!
+        
+        # Generate high-frequency updates
+        while [ $(date +%s) -lt $END_TIME ]; do
+            RESOURCE_ID=$((RANDOM % RESOURCE_COUNT + 1))
+            REPLICA_COUNT=$((RANDOM % 10 + 1))
+            
+            kubectl patch nginxdeployment stress-test-$RESOURCE_ID -n $TEST_NAMESPACE \
+                --type='merge' -p="{\"spec\":{\"replicas\":$REPLICA_COUNT}}" \
+                2>/dev/null || true
+            
+            sleep $UPDATE_INTERVAL
+        done
+        
+        # Stop monitoring
+        kill $MONITOR_PID 2>/dev/null || true
+        
+        # Collect final metrics
+        collect_test_metrics "stress-test"
+        
+        # Cleanup resources
+        echo "Cleaning up stress test resources..."
+        kubectl delete nginxdeployment --all -n $TEST_NAMESPACE
+        
+        echo "Stress test completed."
+    }
+    
+    # Endurance test for long-running operations
+    run_endurance_test() {
+        echo "Running Endurance Test: Long-Running Operations"
+        
+        local RESOURCE_COUNT=30
+        local DURATION=1800  # 30 minutes
+        local UPDATE_INTERVAL=30  # Update every 30 seconds
+        
+        echo "Creating $RESOURCE_COUNT NginxDeployment resources..."
+        
+        # Create resources for endurance test
+        for i in $(seq 1 $RESOURCE_COUNT); do
+            cat <<EOF | kubectl apply -f -
+    apiVersion: deploy.example.com/v1alpha1
+    kind: NginxDeployment
+    metadata:
+      name: endurance-test-$i
+      namespace: $TEST_NAMESPACE
+    spec:
+      deploymentName: endurance-app-$i
+      namespace: $TEST_NAMESPACE
+      image: nginx:1.24
+      replicas: 1
+    EOF
+        done
+        
+        echo "Waiting for initial reconciliation..."
+        sleep 60
+        
+        # Start endurance test
+        echo "Starting endurance test (duration: $DURATION seconds, update interval: $UPDATE_INTERVAL seconds)..."
+        
+        local END_TIME=$(($(date +%s) + DURATION))
+        
+        # Monitor metrics during endurance test
+        monitor_metrics_during_test $DURATION "endurance-test" &
+        MONITOR_PID=$!
+        
+        # Periodic updates during endurance test
+        while [ $(date +%s) -lt $END_TIME ]; do
+            # Update a random subset of resources
+            for i in $(seq 1 5); do  # Update 5 random resources each cycle
+                RESOURCE_ID=$((RANDOM % RESOURCE_COUNT + 1))
+                REPLICA_COUNT=$((RANDOM % 3 + 1))
+                
+                kubectl patch nginxdeployment endurance-test-$RESOURCE_ID -n $TEST_NAMESPACE \
+                    --type='merge' -p="{\"spec\":{\"replicas\":$REPLICA_COUNT}}" \
+                    2>/dev/null || true
+            done
+            
+            sleep $UPDATE_INTERVAL
+        done
+        
+        # Stop monitoring
+        kill $MONITOR_PID 2>/dev/null || true
+        
+        # Collect final metrics
+        collect_test_metrics "endurance-test"
+        
+        # Cleanup resources
+        echo "Cleaning up endurance test resources..."
+        kubectl delete nginxdeployment --all -n $TEST_NAMESPACE
+        
+        echo "Endurance test completed."
+    }
+    
+    # Monitor metrics during test execution
+    monitor_metrics_during_test() {
+        local DURATION=$1
+        local TEST_NAME=$2
+        local SAMPLE_INTERVAL=10  # Sample every 10 seconds
+        
+        local END_TIME=$(($(date +%s) + DURATION))
+        local SAMPLE_COUNT=0
+        
+        echo "Starting metrics monitoring for $TEST_NAME..."
+        
+        while [ $(date +%s) -lt $END_TIME ]; do
+            SAMPLE_COUNT=$((SAMPLE_COUNT + 1))
+            TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+            
+            # Controller pod metrics
+            CONTROLLER_POD=$(kubectl get pods -n nginx-helm-operator-system -l control-plane=controller-manager -o jsonpath='{.items[0].metadata.name}')
+            
+            # Memory and CPU usage
+            kubectl top pod $CONTROLLER_POD -n nginx-helm-operator-system >> $RESULTS_DIR/${TEST_NAME}-memory-cpu.log 2>/dev/null || echo "$TIMESTAMP: Failed to get pod metrics" >> $RESULTS_DIR/${TEST_NAME}-memory-cpu.log
+            
+            # Controller logs for errors
+            ERROR_COUNT=$(kubectl logs -n nginx-helm-operator-system $CONTROLLER_POD --tail=100 --since=10s | grep -i "error\|conflict\|retry" | wc -l)
+            echo "$TIMESTAMP: Errors in last 10s: $ERROR_COUNT" >> $RESULTS_DIR/${TEST_NAME}-errors.log
+            
+            # Resource count
+            RESOURCE_COUNT=$(kubectl get nginxdeployment -n $TEST_NAMESPACE --no-headers | wc -l)
+            echo "$TIMESTAMP: Active resources: $RESOURCE_COUNT" >> $RESULTS_DIR/${TEST_NAME}-resources.log
+            
+            sleep $SAMPLE_INTERVAL
+        done
+        
+        echo "Metrics monitoring completed for $TEST_NAME (samples: $SAMPLE_COUNT)."
+    }
+    
+    # Collect test metrics
+    collect_test_metrics() {
+        local TEST_NAME=$1
+        
+        echo "Collecting final metrics for $TEST_NAME..."
+        
+        # Controller metrics
+        CONTROLLER_POD=$(kubectl get pods -n nginx-helm-operator-system -l control-plane=controller-manager -o jsonpath='{.items[0].metadata.name}')
+        
+        # Final resource usage
+        kubectl top pod $CONTROLLER_POD -n nginx-helm-operator-system > $RESULTS_DIR/${TEST_NAME}-final-metrics.txt
+        
+        # Controller logs summary
+        kubectl logs -n nginx-helm-operator-system $CONTROLLER_POD --tail=500 > $RESULTS_DIR/${TEST_NAME}-controller-logs.txt
+        
+        # Error summary
+        ERROR_COUNT=$(grep -i "error\|panic\|conflict" $RESULTS_DIR/${TEST_NAME}-controller-logs.txt | wc -l)
+        echo "Total errors during $TEST_NAME: $ERROR_COUNT" > $RESULTS_DIR/${TEST_NAME}-error-summary.txt
+        
+        # Reconciliation metrics (if available)
+        kubectl exec -n nginx-helm-operator-system $CONTROLLER_POD -- curl -s localhost:8080/metrics > $RESULTS_DIR/${TEST_NAME}-prometheus-metrics.txt 2>/dev/null || echo "Metrics endpoint not available" > $RESULTS_DIR/${TEST_NAME}-prometheus-metrics.txt
+        
+        echo "Metrics collection completed for $TEST_NAME."
+    }
+    
+    # Generate performance report
+    generate_performance_report() {
+        echo "Generating performance test report..."
+        
+        local REPORT_FILE="$RESULTS_DIR/performance-report.txt"
+        local END_TIME=$(date +%s)
+        local TOTAL_DURATION=$((END_TIME - START_TIME))
+        
+        cat > $REPORT_FILE <<EOF
+    nginx-helm-operator Performance Test Report
+    ==========================================
+    
+    Test Execution Summary:
+    - Start Time: $(date -d @$START_TIME)
+    - End Time: $(date -d @$END_TIME)
+    - Total Duration: $TOTAL_DURATION seconds
+    
+    Test Results:
+    
+    EOF
+        
+        # Analyze each test results
+        for TEST in "load-test" "stress-test" "endurance-test"; do
+            if [ -f "$RESULTS_DIR/${TEST}-error-summary.txt" ]; then
+                echo "$TEST Results:" >> $REPORT_FILE
+                echo "$(cat $RESULTS_DIR/${TEST}-error-summary.txt)" >> $REPORT_FILE
+                
+                # Memory usage analysis
+                if [ -f "$RESULTS_DIR/${TEST}-memory-cpu.log" ]; then
+                    MAX_MEMORY=$(grep -o '[0-9]*Mi' $RESULTS_DIR/${TEST}-memory-cpu.log | sed 's/Mi//' | sort -n | tail -1)
+                    echo "Peak Memory Usage: ${MAX_MEMORY}Mi" >> $REPORT_FILE
+                fi
+                
+                echo "" >> $REPORT_FILE
+            fi
+        done
+        
+        # Performance recommendations
+        cat >> $REPORT_FILE <<EOF
+    Performance Recommendations:
+    
+    1. Monitor memory usage trends for potential leaks
+    2. Review error rates and implement additional retry logic if needed
+    3. Consider resource limits based on peak usage
+    4. Implement metrics collection for better observability
+    
+    Detailed logs and metrics are available in: $RESULTS_DIR
+    EOF
+        
+        echo "Performance report generated: $REPORT_FILE"
+        cat $REPORT_FILE
+    }
+    
+    # Cleanup function
+    cleanup_performance_test_environment() {
+        echo "Cleaning up performance test environment..."
+        
+        # Delete test resources
+        kubectl delete nginxdeployment --all -n $TEST_NAMESPACE --ignore-not-found=true
+        
+        # Delete test namespace
+        kubectl delete namespace $TEST_NAMESPACE --ignore-not-found=true
+        
+        echo "Performance test cleanup completed."
+    }
+    
+    # Main execution
+    main() {
+        echo "=== nginx-helm-operator Performance Test Suite ==="
+        echo "Start time: $(date)"
+        
+        # Check if bc is available for calculations
+        if ! command -v bc &> /dev/null; then
+            echo "Installing bc for calculations..."
+            apt-get update && apt-get install -y bc
+        fi
+        
+        # Setup
+        setup_performance_test_environment
+        
+        # Run performance tests
+        echo "Starting performance test execution..."
+        
+        run_load_test
+        sleep 60  # Cool down between tests
+        
+        run_stress_test
+        sleep 60  # Cool down between tests
+        
+        # Note: Endurance test is commented out for CI/CD environments
+        # Uncomment for full performance testing
+        # run_endurance_test
+        
+        # Generate report
+        generate_performance_report
+        
+        # Cleanup
+        cleanup_performance_test_environment
+        
+        echo "=== Performance Test Suite Completed ==="
+        echo "End time: $(date)"
+    }
+    
+    # Execute main function
+    main "$@"
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: performance-test-runner
+  namespace: nginx-helm-operator-system
+spec:
+  template:
+    spec:
+      serviceAccountName: nginx-helm-operator-test-runner
+      containers:
+      - name: performance-test-runner
+        image: bitnami/kubectl:latest
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          # Install required tools
+          apt-get update && apt-get install -y bc curl
+          
+          # Copy test scripts from ConfigMap
+          cp /performance-scripts/* /tmp/
+          chmod +x /tmp/*.sh
+          
+          # Run performance tests
+          echo "Running nginx-helm-operator performance tests..."
+          /tmp/run-performance-tests.sh
+        volumeMounts:
+        - name: performance-scripts
+          mountPath: /performance-scripts
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: performance-scripts
+        configMap:
+          name: performance-test-scripts
+      restartPolicy: Never
+  backoffLimit: 2

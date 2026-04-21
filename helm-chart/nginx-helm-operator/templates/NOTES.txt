@@ -1,0 +1,48 @@
+1. Get the application URL by running these commands:
+{{- if .Values.metrics.enabled }}
+  export POD_NAME=$(kubectl get pods --namespace {{ include "nginx-helm-operator.namespaceName" . }} -l "app.kubernetes.io/name={{ include "nginx-helm-operator.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ include "nginx-helm-operator.namespaceName" . }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to access the metrics endpoint"
+  kubectl --namespace {{ include "nginx-helm-operator.namespaceName" . }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+2. Check the operator status:
+  kubectl get deployment {{ include "nginx-helm-operator.fullname" . }}-controller-manager --namespace {{ include "nginx-helm-operator.namespaceName" . }}
+
+3. View operator logs:
+  kubectl logs -f deployment/{{ include "nginx-helm-operator.fullname" . }}-controller-manager --namespace {{ include "nginx-helm-operator.namespaceName" . }}
+
+4. Create a sample NginxDeployment:
+  cat <<EOF | kubectl apply -f -
+  apiVersion: deploy.example.com/v1alpha1
+  kind: NginxDeployment
+  metadata:
+    name: sample-nginx
+    namespace: default
+  spec:
+    deploymentName: sample-app
+    image: nginx:1.24
+    replicas: 2
+    namespace: default
+  EOF
+
+5. Check the NginxDeployment status:
+  kubectl get nginxdeployments
+  kubectl describe nginxdeployment sample-nginx
+
+6. Clean up the sample deployment:
+  kubectl delete nginxdeployment sample-nginx
+
+{{- if .Values.healthCheck.enabled }}
+7. Health check endpoints:
+  - Liveness: http://localhost:{{ .Values.healthCheck.port }}/healthz
+  - Readiness: http://localhost:{{ .Values.healthCheck.port }}/readyz
+{{- end }}
+
+{{- if .Values.webhook.enabled }}
+8. Webhook configuration:
+  The operator includes admission webhooks for validation and mutation.
+  Webhook endpoint: https://{{ include "nginx-helm-operator.fullname" . }}-webhook-service.{{ include "nginx-helm-operator.namespaceName" . }}.svc:{{ .Values.webhook.service.port }}
+{{- end }}
+
+For more information, visit: https://github.com/your-org/nginx-helm-operator

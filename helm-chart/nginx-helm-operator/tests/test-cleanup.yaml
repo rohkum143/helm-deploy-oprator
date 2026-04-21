@@ -1,0 +1,43 @@
+# Test case for cleanup functionality
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "nginx-helm-operator.fullname" . }}-test-cleanup
+  namespace: {{ include "nginx-helm-operator.namespaceName" . }}
+  labels:
+    {{- include "nginx-helm-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: test-cleanup
+    image: busybox:1.35
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set -e
+      echo "Testing cleanup functionality..."
+      
+      # Clean up any remaining test resources
+      echo "Cleaning up test resources..."
+      kubectl delete nginxdeployment --all -A --ignore-not-found=true
+      
+      # Wait for cleanup to complete
+      sleep 10
+      
+      # Verify no NginxDeployment resources remain
+      echo "Verifying cleanup..."
+      REMAINING=$(kubectl get nginxdeployments -A --no-headers 2>/dev/null | wc -l || echo "0")
+      if [ "$REMAINING" -gt 0 ]; then
+        echo "WARNING: Found $REMAINING remaining NginxDeployment resources"
+        kubectl get nginxdeployments -A
+      else
+        echo "All NginxDeployment resources cleaned up successfully"
+      fi
+      
+      echo "Cleanup test completed!"

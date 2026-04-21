@@ -1,0 +1,642 @@
+# Conflict Resolution Test Cases for nginx-helm-operator
+# This file contains comprehensive test scenarios to validate conflict resolution functionality
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conflict-resolution-test-config
+  namespace: nginx-helm-operator-system
+data:
+  test-scenarios.yaml: |
+    # Test Scenario 1: Concurrent Modifications
+    scenario_1:
+      name: "Concurrent Resource Modifications"
+      description: "Test conflict resolution when multiple clients modify the same NginxDeployment resource simultaneously"
+      steps:
+        - name: "Create initial NginxDeployment"
+          action: "create"
+          resource: |
+            apiVersion: deploy.example.com/v1alpha1
+            kind: NginxDeployment
+            metadata:
+              name: conflict-test-1
+              namespace: default
+            spec:
+              deploymentName: conflict-app-1
+              namespace: test-namespace-1
+              image: nginx:1.24
+              replicas: 1
+        
+        - name: "Simulate concurrent modification 1"
+          action: "update"
+          field: "spec.replicas"
+          value: 3
+          delay: "0s"
+        
+        - name: "Simulate concurrent modification 2"
+          action: "update"
+          field: "spec.image"
+          value: "nginx:1.25"
+          delay: "100ms"
+        
+        - name: "Verify conflict resolution"
+          action: "verify"
+          expected:
+            - "No reconciliation loops"
+            - "Both changes applied successfully"
+            - "Final state consistent"
+    
+    # Test Scenario 2: Status Update Conflicts
+    scenario_2:
+      name: "Status Update Conflicts"
+      description: "Test conflict resolution during status updates while spec changes occur"
+      steps:
+        - name: "Create NginxDeployment with deployment in progress"
+          action: "create"
+          resource: |
+            apiVersion: deploy.example.com/v1alpha1
+            kind: NginxDeployment
+            metadata:
+              name: conflict-test-2
+              namespace: default
+            spec:
+              deploymentName: conflict-app-2
+              namespace: test-namespace-2
+              image: nginx:1.24
+              replicas: 2
+        
+        - name: "Trigger status update during spec change"
+          action: "concurrent"
+          operations:
+            - type: "status_update"
+              field: "status.phase"
+              value: "Deploying"
+            - type: "spec_update"
+              field: "spec.replicas"
+              value: 4
+        
+        - name: "Verify status consistency"
+          action: "verify"
+          expected:
+            - "Status reflects actual deployment state"
+            - "No status update conflicts"
+            - "Spec changes applied correctly"
+    
+    # Test Scenario 3: Finalizer Management Conflicts
+    scenario_3:
+      name: "Finalizer Management Conflicts"
+      description: "Test conflict resolution during finalizer addition/removal"
+      steps:
+        - name: "Create resource without finalizer"
+          action: "create"
+          resource: |
+            apiVersion: deploy.example.com/v1alpha1
+            kind: NginxDeployment
+            metadata:
+              name: conflict-test-3
+              namespace: default
+            spec:
+              deploymentName: conflict-app-3
+              namespace: test-namespace-3
+              image: nginx:1.24
+              replicas: 1
+        
+        - name: "Simulate finalizer addition conflict"
+          action: "concurrent"
+          operations:
+            - type: "add_finalizer"
+              finalizer: "deploy.example.com/nginx-deployment-finalizer"
+            - type: "spec_update"
+              field: "spec.image"
+              value: "nginx:1.25"
+        
+        - name: "Test deletion with finalizer conflicts"
+          action: "delete"
+          concurrent_operations:
+            - type: "remove_finalizer"
+            - type: "status_update"
+              field: "status.phase"
+              value: "Deleting"
+        
+        - name: "Verify clean deletion"
+          action: "verify"
+          expected:
+            - "Resource deleted successfully"
+            - "No finalizer conflicts"
+            - "Clean resource cleanup"
+    
+    # Test Scenario 4: High-Frequency Updates
+    scenario_4:
+      name: "High-Frequency Update Stress Test"
+      description: "Test conflict resolution under high-frequency update scenarios"
+      steps:
+        - name: "Create base resource"
+          action: "create"
+          resource: |
+            apiVersion: deploy.example.com/v1alpha1
+            kind: NginxDeployment
+            metadata:
+              name: conflict-test-4
+              namespace: default
+            spec:
+              deploymentName: conflict-app-4
+              namespace: test-namespace-4
+              image: nginx:1.24
+              replicas: 1
+        
+        - name: "Generate high-frequency updates"
+          action: "stress_test"
+          duration: "60s"
+          operations_per_second: 10
+          update_types:
+            - "spec.replicas"
+            - "spec.image"
+            - "metadata.annotations"
+        
+        - name: "Verify system stability"
+          action: "verify"
+          expected:
+            - "No reconciliation loops"
+            - "All updates processed"
+            - "System remains stable"
+            - "Controller memory usage stable"
+    
+    # Test Scenario 5: Network Partition Recovery
+    scenario_5:
+      name: "Network Partition Recovery"
+      description: "Test conflict resolution after network partition recovery"
+      steps:
+        - name: "Create resource before partition"
+          action: "create"
+          resource: |
+            apiVersion: deploy.example.com/v1alpha1
+            kind: NginxDeployment
+            metadata:
+              name: conflict-test-5
+              namespace: default
+            spec:
+              deploymentName: conflict-app-5
+              namespace: test-namespace-5
+              image: nginx:1.24
+              replicas: 2
+        
+        - name: "Simulate network partition"
+          action: "network_partition"
+          duration: "30s"
+          affected_components:
+            - "controller"
+            - "api_server"
+        
+        - name: "Make changes during partition"
+          action: "update"
+          field: "spec.replicas"
+          value: 5
+        
+        - name: "Restore network connectivity"
+          action: "restore_network"
+        
+        - name: "Verify conflict resolution after recovery"
+          action: "verify"
+          expected:
+            - "Changes reconciled correctly"
+            - "No data loss"
+            - "System recovers gracefully"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-execution-scripts
+  namespace: nginx-helm-operator-system
+data:
+  run-conflict-tests.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Starting nginx-helm-operator conflict resolution tests..."
+    
+    # Test environment setup
+    setup_test_environment() {
+        echo "Setting up test environment..."
+        
+        # Create test namespaces
+        kubectl create namespace test-namespace-1 --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create namespace test-namespace-2 --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create namespace test-namespace-3 --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create namespace test-namespace-4 --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create namespace test-namespace-5 --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Verify operator is running
+        kubectl wait --for=condition=Ready pod -l control-plane=controller-manager -n nginx-helm-operator-system --timeout=300s
+        
+        echo "Test environment ready."
+    }
+    
+    # Test Scenario 1: Concurrent Modifications
+    test_concurrent_modifications() {
+        echo "Running Test Scenario 1: Concurrent Modifications"
+        
+        # Create initial resource
+        cat <<EOF | kubectl apply -f -
+    apiVersion: deploy.example.com/v1alpha1
+    kind: NginxDeployment
+    metadata:
+      name: conflict-test-1
+      namespace: default
+    spec:
+      deploymentName: conflict-app-1
+      namespace: test-namespace-1
+      image: nginx:1.24
+      replicas: 1
+    EOF
+        
+        # Wait for initial reconciliation
+        sleep 5
+        
+        # Simulate concurrent modifications
+        (
+            sleep 0.1
+            kubectl patch nginxdeployment conflict-test-1 --type='merge' -p='{"spec":{"replicas":3}}'
+        ) &
+        
+        (
+            sleep 0.2
+            kubectl patch nginxdeployment conflict-test-1 --type='merge' -p='{"spec":{"image":"nginx:1.25"}}'
+        ) &
+        
+        wait
+        
+        # Verify final state
+        sleep 10
+        REPLICAS=$(kubectl get nginxdeployment conflict-test-1 -o jsonpath='{.spec.replicas}')
+        IMAGE=$(kubectl get nginxdeployment conflict-test-1 -o jsonpath='{.spec.image}')
+        
+        if [[ "$REPLICAS" == "3" && "$IMAGE" == "nginx:1.25" ]]; then
+            echo "✓ Test Scenario 1 PASSED: Both concurrent modifications applied successfully"
+        else
+            echo "✗ Test Scenario 1 FAILED: Expected replicas=3, image=nginx:1.25, got replicas=$REPLICAS, image=$IMAGE"
+            return 1
+        fi
+        
+        # Cleanup
+        kubectl delete nginxdeployment conflict-test-1 --ignore-not-found=true
+    }
+    
+    # Test Scenario 2: Status Update Conflicts
+    test_status_conflicts() {
+        echo "Running Test Scenario 2: Status Update Conflicts"
+        
+        # Create resource
+        cat <<EOF | kubectl apply -f -
+    apiVersion: deploy.example.com/v1alpha1
+    kind: NginxDeployment
+    metadata:
+      name: conflict-test-2
+      namespace: default
+    spec:
+      deploymentName: conflict-app-2
+      namespace: test-namespace-2
+      image: nginx:1.24
+      replicas: 2
+    EOF
+        
+        # Wait for deployment to start
+        sleep 5
+        
+        # Trigger concurrent spec and status updates
+        (
+            kubectl patch nginxdeployment conflict-test-2 --type='merge' -p='{"spec":{"replicas":4}}'
+        ) &
+        
+        # Wait for reconciliation to complete
+        sleep 15
+        
+        # Verify final state
+        PHASE=$(kubectl get nginxdeployment conflict-test-2 -o jsonpath='{.status.phase}')
+        REPLICAS=$(kubectl get nginxdeployment conflict-test-2 -o jsonpath='{.spec.replicas}')
+        
+        if [[ "$PHASE" == "Deployed" && "$REPLICAS" == "4" ]]; then
+            echo "✓ Test Scenario 2 PASSED: Status and spec updates handled correctly"
+        else
+            echo "✗ Test Scenario 2 FAILED: Expected phase=Deployed, replicas=4, got phase=$PHASE, replicas=$REPLICAS"
+            return 1
+        fi
+        
+        # Cleanup
+        kubectl delete nginxdeployment conflict-test-2 --ignore-not-found=true
+    }
+    
+    # Test Scenario 3: Finalizer Management
+    test_finalizer_conflicts() {
+        echo "Running Test Scenario 3: Finalizer Management Conflicts"
+        
+        # Create resource
+        cat <<EOF | kubectl apply -f -
+    apiVersion: deploy.example.com/v1alpha1
+    kind: NginxDeployment
+    metadata:
+      name: conflict-test-3
+      namespace: default
+    spec:
+      deploymentName: conflict-app-3
+      namespace: test-namespace-3
+      image: nginx:1.24
+      replicas: 1
+    EOF
+        
+        # Wait for finalizer to be added
+        sleep 5
+        
+        # Verify finalizer exists
+        FINALIZER=$(kubectl get nginxdeployment conflict-test-3 -o jsonpath='{.metadata.finalizers[0]}')
+        
+        if [[ "$FINALIZER" == "deploy.example.com/nginx-deployment-finalizer" ]]; then
+            echo "✓ Finalizer added successfully"
+        else
+            echo "✗ Finalizer not found or incorrect"
+            return 1
+        fi
+        
+        # Test deletion with finalizer
+        kubectl delete nginxdeployment conflict-test-3 &
+        
+        # Wait for cleanup
+        sleep 15
+        
+        # Verify resource is deleted
+        if kubectl get nginxdeployment conflict-test-3 2>/dev/null; then
+            echo "✗ Test Scenario 3 FAILED: Resource not deleted properly"
+            return 1
+        else
+            echo "✓ Test Scenario 3 PASSED: Finalizer management and deletion successful"
+        fi
+    }
+    
+    # Test Scenario 4: High-Frequency Updates
+    test_high_frequency_updates() {
+        echo "Running Test Scenario 4: High-Frequency Updates"
+        
+        # Create resource
+        cat <<EOF | kubectl apply -f -
+    apiVersion: deploy.example.com/v1alpha1
+    kind: NginxDeployment
+    metadata:
+      name: conflict-test-4
+      namespace: default
+    spec:
+      deploymentName: conflict-app-4
+      namespace: test-namespace-4
+      image: nginx:1.24
+      replicas: 1
+    EOF
+        
+        # Wait for initial deployment
+        sleep 5
+        
+        # Generate high-frequency updates
+        echo "Generating high-frequency updates for 30 seconds..."
+        END_TIME=$((SECONDS + 30))
+        UPDATE_COUNT=0
+        
+        while [ $SECONDS -lt $END_TIME ]; do
+            REPLICA_COUNT=$((RANDOM % 5 + 1))
+            kubectl patch nginxdeployment conflict-test-4 --type='merge' -p="{\"spec\":{\"replicas\":$REPLICA_COUNT}}" 2>/dev/null || true
+            UPDATE_COUNT=$((UPDATE_COUNT + 1))
+            sleep 0.5
+        done
+        
+        echo "Generated $UPDATE_COUNT updates"
+        
+        # Wait for reconciliation to stabilize
+        sleep 15
+        
+        # Check controller logs for errors
+        ERROR_COUNT=$(kubectl logs -n nginx-helm-operator-system -l control-plane=controller-manager --tail=100 | grep -i "error\|panic\|conflict" | wc -l)
+        
+        if [ $ERROR_COUNT -lt 5 ]; then  # Allow some conflicts but not excessive
+            echo "✓ Test Scenario 4 PASSED: High-frequency updates handled with minimal errors ($ERROR_COUNT errors)"
+        else
+            echo "✗ Test Scenario 4 FAILED: Too many errors during high-frequency updates ($ERROR_COUNT errors)"
+            return 1
+        fi
+        
+        # Cleanup
+        kubectl delete nginxdeployment conflict-test-4 --ignore-not-found=true
+    }
+    
+    # Cleanup function
+    cleanup_test_environment() {
+        echo "Cleaning up test environment..."
+        
+        # Delete test resources
+        kubectl delete nginxdeployment --all --ignore-not-found=true
+        
+        # Delete test namespaces
+        kubectl delete namespace test-namespace-1 --ignore-not-found=true
+        kubectl delete namespace test-namespace-2 --ignore-not-found=true
+        kubectl delete namespace test-namespace-3 --ignore-not-found=true
+        kubectl delete namespace test-namespace-4 --ignore-not-found=true
+        kubectl delete namespace test-namespace-5 --ignore-not-found=true
+        
+        echo "Cleanup completed."
+    }
+    
+    # Main execution
+    main() {
+        echo "=== nginx-helm-operator Conflict Resolution Test Suite ==="
+        echo "Start time: $(date)"
+        
+        # Setup
+        setup_test_environment
+        
+        # Run tests
+        FAILED_TESTS=0
+        
+        test_concurrent_modifications || FAILED_TESTS=$((FAILED_TESTS + 1))
+        test_status_conflicts || FAILED_TESTS=$((FAILED_TESTS + 1))
+        test_finalizer_conflicts || FAILED_TESTS=$((FAILED_TESTS + 1))
+        test_high_frequency_updates || FAILED_TESTS=$((FAILED_TESTS + 1))
+        
+        # Cleanup
+        cleanup_test_environment
+        
+        # Report results
+        echo "=== Test Results ==="
+        echo "End time: $(date)"
+        
+        if [ $FAILED_TESTS -eq 0 ]; then
+            echo "✓ All tests PASSED!"
+            exit 0
+        else
+            echo "✗ $FAILED_TESTS test(s) FAILED!"
+            exit 1
+        fi
+    }
+    
+    # Execute main function
+    main "$@"
+  
+  validate-conflict-resolution.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Validating nginx-helm-operator conflict resolution implementation..."
+    
+    # Check if controller has conflict resolution features
+    validate_controller_features() {
+        echo "Checking controller implementation..."
+        
+        # Check if controller pod is running
+        if ! kubectl get pods -n nginx-helm-operator-system -l control-plane=controller-manager | grep -q Running; then
+            echo "✗ Controller pod is not running"
+            return 1
+        fi
+        
+        # Check controller logs for conflict resolution features
+        LOGS=$(kubectl logs -n nginx-helm-operator-system -l control-plane=controller-manager --tail=50)
+        
+        if echo "$LOGS" | grep -q "retry\|backoff\|conflict"; then
+            echo "✓ Conflict resolution features detected in logs"
+        else
+            echo "? No conflict resolution activity in recent logs (this is normal if no conflicts occurred)"
+        fi
+        
+        echo "✓ Controller validation completed"
+    }
+    
+    # Check CRD for conflict resolution annotations
+    validate_crd_features() {
+        echo "Checking CRD configuration..."
+        
+        # Check if CRD exists
+        if ! kubectl get crd nginxdeployments.deploy.example.com >/dev/null 2>&1; then
+            echo "✗ NginxDeployment CRD not found"
+            return 1
+        fi
+        
+        echo "✓ CRD validation completed"
+    }
+    
+    # Check RBAC permissions
+    validate_rbac_permissions() {
+        echo "Checking RBAC permissions..."
+        
+        SA="system:serviceaccount:nginx-helm-operator-system:nginx-helm-operator-controller-manager"
+        
+        # Check basic permissions
+        if kubectl auth can-i get nginxdeployments --as="$SA"; then
+            echo "✓ Controller has read permissions"
+        else
+            echo "✗ Controller missing read permissions"
+            return 1
+        fi
+        
+        if kubectl auth can-i update nginxdeployments --as="$SA"; then
+            echo "✓ Controller has update permissions"
+        else
+            echo "✗ Controller missing update permissions"
+            return 1
+        fi
+        
+        if kubectl auth can-i update nginxdeployments/status --as="$SA"; then
+            echo "✓ Controller has status update permissions"
+        else
+            echo "✗ Controller missing status update permissions"
+            return 1
+        fi
+        
+        echo "✓ RBAC validation completed"
+    }
+    
+    # Main validation
+    main() {
+        echo "=== Conflict Resolution Validation ==="
+        
+        validate_controller_features
+        validate_crd_features
+        validate_rbac_permissions
+        
+        echo "=== Validation Summary ==="
+        echo "✓ nginx-helm-operator conflict resolution validation completed successfully"
+        echo "Ready to run conflict resolution tests."
+    }
+    
+    main "$@"
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: conflict-resolution-test-runner
+  namespace: nginx-helm-operator-system
+spec:
+  template:
+    spec:
+      serviceAccountName: nginx-helm-operator-test-runner
+      containers:
+      - name: test-runner
+        image: bitnami/kubectl:latest
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          # Copy test scripts from ConfigMap
+          cp /test-scripts/* /tmp/
+          chmod +x /tmp/*.sh
+          
+          # Run validation first
+          echo "Running conflict resolution validation..."
+          /tmp/validate-conflict-resolution.sh
+          
+          # Run conflict resolution tests
+          echo "Running conflict resolution tests..."
+          /tmp/run-conflict-tests.sh
+        volumeMounts:
+        - name: test-scripts
+          mountPath: /test-scripts
+      volumes:
+      - name: test-scripts
+        configMap:
+          name: test-execution-scripts
+      restartPolicy: Never
+  backoffLimit: 3
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-helm-operator-test-runner
+  namespace: nginx-helm-operator-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nginx-helm-operator-test-runner
+rules:
+- apiGroups: [""]
+  resources: ["namespaces", "pods", "services", "configmaps"]
+  verbs: ["get", "list", "create", "delete", "patch", "update"]
+- apiGroups: ["deploy.example.com"]
+  resources: ["nginxdeployments"]
+  verbs: ["get", "list", "create", "delete", "patch", "update"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nginx-helm-operator-test-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nginx-helm-operator-test-runner
+subjects:
+- kind: ServiceAccount
+  name: nginx-helm-operator-test-runner
+  namespace: nginx-helm-operator-system

@@ -1,0 +1,30 @@
+apiVersion: deploy.example.com/v1alpha1
+kind: NginxDeployment
+metadata:
+  name: staging-nginx
+  namespace: default
+  # Add annotations for conflict resolution tracking
+  annotations:
+    deploy.example.com/last-applied-configuration: |
+      {"apiVersion":"deploy.example.com/v1alpha1","kind":"NginxDeployment","metadata":{"name":"staging-nginx","namespace":"default"},"spec":{"deploymentName":"staging-app","namespace":"staging","image":"nginx:1.24","replicas":2}}
+    deploy.example.com/conflict-resolution: "enabled"
+spec:
+  deploymentName: staging-app
+  namespace: staging # Target namespace
+  image: nginx:1.24
+  replicas: 2
+  # Add Helm values for better configuration management
+  helmValues:
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}

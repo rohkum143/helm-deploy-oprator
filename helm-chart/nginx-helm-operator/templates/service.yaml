@@ -1,0 +1,30 @@
+{{- if or .Values.metrics.enabled .Values.webhook.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nginx-helm-operator.fullname" . }}-controller-manager-metrics-service
+  namespace: {{ include "nginx-helm-operator.namespaceName" . }}
+  labels:
+    {{- include "nginx-helm-operator.labels" . | nindent 4 }}
+    control-plane: controller-manager
+  annotations:
+    {{- include "nginx-helm-operator.annotations" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+  {{- if .Values.metrics.enabled }}
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: metrics
+  {{- end }}
+  {{- if .Values.webhook.enabled }}
+  - name: webhook-server
+    port: {{ .Values.webhook.service.port }}
+    protocol: TCP
+    targetPort: webhook-server
+  {{- end }}
+  selector:
+    {{- include "nginx-helm-operator.selectorLabels" . | nindent 4 }}
+    control-plane: controller-manager
+{{- end }}

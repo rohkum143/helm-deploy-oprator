@@ -1,0 +1,22 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "nginx-helm-operator.fullname" . }}-pdb
+  namespace: {{ include "nginx-helm-operator.namespaceName" . }}
+  labels:
+    {{- include "nginx-helm-operator.labels" . | nindent 4 }}
+  annotations:
+    {{- include "nginx-helm-operator.annotations" . | nindent 4 }}
+spec:
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "nginx-helm-operator.selectorLabels" . | nindent 6 }}
+      control-plane: controller-manager
+{{- end }}

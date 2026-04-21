@@ -1,0 +1,119 @@
+# Test cases for nginx-helm-operator deployment functionality
+# This file contains comprehensive test scenarios to validate operator behavior
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: operator-test
+---
+# Test Case 1: Basic deployment functionality
+apiVersion: deploy.example.com/v1alpha1
+kind: NginxDeployment
+metadata:
+  name: test-basic-deployment
+  namespace: default
+spec:
+  deploymentName: test-basic-app
+  image: nginx:1.24
+  replicas: 1
+  namespace: operator-test
+---
+# Test Case 2: Deployment with custom resources
+apiVersion: deploy.example.com/v1alpha1
+kind: NginxDeployment
+metadata:
+  name: test-custom-resources
+  namespace: default
+spec:
+  deploymentName: test-custom-app
+  image: nginx:1.25
+  replicas: 2
+  namespace: operator-test
+  helmValues:
+    resources:
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    service:
+      type: ClusterIP
+      port: 80
+---
+# Test Case 3: Deployment with affinity and tolerations
+apiVersion: deploy.example.com/v1alpha1
+kind: NginxDeployment
+metadata:
+  name: test-affinity-tolerations
+  namespace: default
+spec:
+  deploymentName: test-affinity-app
+  image: nginx:latest
+  replicas: 1
+  namespace: operator-test
+  helmValues:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+            matchExpressions:
+            - key: kubernetes.io/arch
+              operator: In
+              values:
+              - amd64
+    tolerations:
+    - key: "test-key"
+      operator: "Equal"
+      value: "test-value"
+      effect: "NoSchedule"
+---
+# Test Case 4: Deployment with custom nginx configuration
+apiVersion: deploy.example.com/v1alpha1
+kind: NginxDeployment
+metadata:
+  name: test-custom-config
+  namespace: default
+spec:
+  deploymentName: test-config-app
+  image: nginx:1.24
+  replicas: 1
+  namespace: operator-test
+  helmValues:
+    nginxConfig: |
+      server {
+          listen 80;
+          server_name localhost;
+          location / {
+              root /usr/share/nginx/html;
+              index index.html index.htm;
+          }
+          location /health {
+              return 200 'healthy\n';
+              add_header Content-Type text/plain;
+          }
+      }
+---
+# Test Case 5: Deployment with multiple replicas and load balancing
+apiVersion: deploy.example.com/v1alpha1
+kind: NginxDeployment
+metadata:
+  name: test-load-balancing
+  namespace: default
+spec:
+  deploymentName: test-lb-app
+  image: nginx:1.25
+  replicas: 3
+  namespace: operator-test
+  helmValues:
+    service:
+      type: LoadBalancer
+      port: 80
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "250m"
+        memory: "256Mi"

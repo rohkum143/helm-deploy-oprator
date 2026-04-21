@@ -1,0 +1,54 @@
+# Test case for RBAC permissions
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "nginx-helm-operator.fullname" . }}-test-rbac
+  namespace: {{ include "nginx-helm-operator.namespaceName" . }}
+  labels:
+    {{- include "nginx-helm-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "3"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "nginx-helm-operator.serviceAccountName" . }}
+  containers:
+  - name: test-rbac
+    image: busybox:1.35
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set -e
+      echo "Testing RBAC permissions..."
+      
+      # Test 1: Check if we can access NginxDeployment resources
+      echo "Test 1: Checking NginxDeployment access..."
+      kubectl auth can-i get nginxdeployments.deploy.example.com --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i create nginxdeployments.deploy.example.com --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i update nginxdeployments.deploy.example.com --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i delete nginxdeployments.deploy.example.com --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      
+      # Test 2: Check if we can access required Kubernetes resources
+      echo "Test 2: Checking Kubernetes resource access..."
+      kubectl auth can-i get deployments --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i create deployments --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i get services --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i create services --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i get configmaps --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i create configmaps --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i get secrets --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i create secrets --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i get serviceaccounts --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i create serviceaccounts --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i get namespaces --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      kubectl auth can-i create namespaces --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }}
+      
+      # Test 3: Check leader election permissions
+      echo "Test 3: Checking leader election permissions..."
+      kubectl auth can-i get leases --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }} -n {{ include "nginx-helm-operator.namespaceName" . }}
+      kubectl auth can-i create leases --as=system:serviceaccount:{{ include "nginx-helm-operator.namespaceName" . }}:{{ include "nginx-helm-operator.serviceAccountName" . }} -n {{ include "nginx-helm-operator.namespaceName" . }}
+      
+      echo "All RBAC tests passed!"

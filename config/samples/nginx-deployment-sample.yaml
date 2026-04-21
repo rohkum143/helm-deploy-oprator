@@ -1,0 +1,59 @@
+apiVersion: deploy.example.com/v1alpha1
+kind: NginxDeployment
+metadata:
+  name: nginx-sample
+  namespace: default
+spec:
+  deploymentName: sample-nginx
+  image: nginx:1.25
+  replicas: 2
+  namespace: default
+  helmValues:
+    service:
+      type: ClusterIP
+      port: 80
+    resources:
+      limits:
+        cpu: 100m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    autoscaling:
+      enabled: false
+    ingress:
+      enabled: false
+---
+apiVersion: deploy.example.com/v1alpha1
+kind: NginxDeployment
+metadata:
+  name: nginx-advanced
+  namespace: default
+spec:
+  deploymentName: advanced-nginx
+  image: nginx:1.25-alpine
+  replicas: 3
+  namespace: production
+  helmValues:
+    service:
+      type: LoadBalancer
+      port: 8080
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 80
+    ingress:
+      enabled: true
+      hosts:
+        - host: nginx.example.local
+          paths:
+            - path: /
+              pathType: Prefix

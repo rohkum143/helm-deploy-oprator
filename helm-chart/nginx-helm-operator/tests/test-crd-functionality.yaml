@@ -1,0 +1,54 @@
+# Test case for CRD functionality
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "nginx-helm-operator.fullname" . }}-test-crd
+  namespace: {{ include "nginx-helm-operator.namespaceName" . }}
+  labels:
+    {{- include "nginx-helm-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: test-crd
+    image: busybox:1.35
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set -e
+      echo "Testing CRD functionality..."
+      
+      # Create a test NginxDeployment resource
+      cat <<EOF | kubectl apply -f -
+      apiVersion: deploy.example.com/v1alpha1
+      kind: NginxDeployment
+      metadata:
+        name: test-nginx
+        namespace: default
+      spec:
+        deploymentName: test-app
+        image: nginx:1.24
+        replicas: 1
+        namespace: default
+      EOF
+      
+      echo "Test NginxDeployment resource created"
+      
+      # Wait for the operator to process the resource
+      sleep 30
+      
+      # Check if the resource was processed
+      kubectl get nginxdeployment test-nginx -n default
+      
+      # Check the status
+      kubectl describe nginxdeployment test-nginx -n default
+      
+      # Clean up test resource
+      kubectl delete nginxdeployment test-nginx -n default --ignore-not-found=true
+      
+      echo "CRD functionality test completed!"

@@ -1,0 +1,19 @@
+apiVersion: v2
+name: nginx-helm-operator
+description: A Helm chart for deploying the Nginx Helm Operator
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://github.com/your-org/nginx-helm-operator
+sources:
+  - https://github.com/your-org/nginx-helm-operator
+maintainers:
+  - name: Your Name
+    email: your.email@example.com
+keywords:
+  - nginx
+  - operator
+  - kubernetes
+  - helm
+annotations:
+  category: Infrastructure
